@@ -1,156 +1,232 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  // --- 状態管理 ---
+  type Mode = 'work' | 'shortBreak' | 'longBreak';
 
-  let name = $state("");
-  let greetMsg = $state("");
+  const TIMES: Record<Mode, number> = {
+    work: 25 * 60,
+    shortBreak: 5 * 60,
+    longBreak: 15 * 60,
+  };
 
-  async function greet(event: Event) {
-    event.preventDefault();
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    greetMsg = await invoke("greet", { name });
+  const LABELS: Record<Mode, string> = {
+    work: '作業',
+    shortBreak: '短い休憩',
+    longBreak: '長い休憩',
+  };
+
+  let mode: Mode = $state('work');
+  let timeLeft: number = $state(TIMES['work']);
+  let isRunning: boolean = $state(false);
+  let pomodoroCount: number = $state(0);
+  let intervalId: ReturnType<typeof setInterval> | null = null;
+
+  // --- 表示用：MM:SS形式に変換 ---
+  function formatTime(seconds: number): string {
+    const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
   }
+
+  // --- モード切り替え ---
+  function setMode(newMode: Mode) {
+    stopTimer();
+    mode = newMode;
+    timeLeft = TIMES[newMode];
+  }
+
+  // --- タイマー開始 ---
+  function startTimer() {
+    if (isRunning) return;
+    isRunning = true;
+    intervalId = setInterval(() => {
+      if (timeLeft > 0) {
+        timeLeft -= 1;
+      } else {
+        // タイマー終了
+        stopTimer();
+        handleTimerEnd();
+      }
+    }, 1000);
+  }
+
+  // --- タイマー停止 ---
+  function stopTimer() {
+    if (intervalId) {
+      clearInterval(intervalId);
+      intervalId = null;
+    }
+    isRunning = false;
+  }
+
+  // --- リセット ---
+  function resetTimer() {
+    stopTimer();
+    timeLeft = TIMES[mode];
+  }
+
+  // --- タイマー終了時の処理 ---
+  function handleTimerEnd() {
+    if (mode === 'work') {
+      pomodoroCount += 1;
+      // 4回ごとに長い休憩
+      if (pomodoroCount % 4 === 0) {
+        setMode('longBreak');
+      } else {
+        setMode('shortBreak');
+      }
+    } else {
+      setMode('work');
+    }
+  }
+
+  // --- 進捗率（円グラフ用）---
+  let progress = $derived(1 - timeLeft / TIMES[mode]);
+  let circumference = 2 * Math.PI * 90; // 半径90の円
+  let dashOffset = $derived(circumference * (1 - progress));
 </script>
 
-<main class="container">
-  <h1>Welcome to Tauri + Svelte</h1>
+<!-- タイトル -->
+<svelte:head>
+  <title>ポモドーロタイマー</title>
+</svelte:head>
 
-  <div class="row">
-    <a href="https://vite.dev" target="_blank">
-      <img src="/vite.svg" class="logo vite" alt="Vite Logo" />
-    </a>
-    <a href="https://tauri.app" target="_blank">
-      <img src="/tauri.svg" class="logo tauri" alt="Tauri Logo" />
-    </a>
-    <a href="https://svelte.dev" target="_blank">
-      <img src="/svelte.svg" class="logo svelte-kit" alt="SvelteKit Logo" />
-    </a>
+<main>
+  <!-- モード選択タブ -->
+  <div class="tabs">
+    {#each (['work', 'shortBreak', 'longBreak'] as Mode[]) as m}
+      <button
+        class="tab"
+        class:active={mode === m}
+        onclick={() => setMode(m)}
+      >
+        {LABELS[m]}
+      </button>
+    {/each}
   </div>
-  <p>Click on the Tauri, Vite, and SvelteKit logos to learn more.</p>
 
-  <form class="row" onsubmit={greet}>
-    <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
-    <button type="submit">Greet</button>
-  </form>
-  <p>{greetMsg}</p>
+  <!-- 円形タイマー -->
+  <div class="timer-container">
+    <svg width="220" height="220" viewBox="0 0 220 220">
+      <!-- 背景の円 -->
+      <circle cx="110" cy="110" r="90" fill="none" stroke="#e0e0e0" stroke-width="10" />
+      <!-- 進捗の円 -->
+      <circle
+        cx="110" cy="110" r="90"
+        fill="none"
+        stroke={mode === 'work' ? '#e74c3c' : '#2ecc71'}
+        stroke-width="10"
+        stroke-linecap="round"
+        stroke-dasharray={circumference}
+        stroke-dashoffset={dashOffset}
+        transform="rotate(-90 110 110)"
+        style="transition: stroke-dashoffset 0.5s ease;"
+      />
+      <!-- 時間表示 -->
+      <text x="110" y="118" text-anchor="middle" class="timer-text">
+        {formatTime(timeLeft)}
+      </text>
+    </svg>
+  </div>
+
+  <!-- ポモドーロ数 -->
+  <p class="count">🍅 × {pomodoroCount}</p>
+
+  <!-- コントロールボタン -->
+  <div class="controls">
+    {#if !isRunning}
+      <button class="btn start" onclick={startTimer}>▶ スタート</button>
+    {:else}
+      <button class="btn pause" onclick={stopTimer}>⏸ 一時停止</button>
+    {/if}
+    <button class="btn reset" onclick={resetTimer}>↺ リセット</button>
+  </div>
 </main>
 
 <style>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
-
-.logo.svelte-kit:hover {
-  filter: drop-shadow(0 0 2em #ff3e00);
-}
-
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
+  main {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    background: #1a1a2e;
+    color: #eee;
+    gap: 1.5rem;
   }
 
-  a:hover {
-    color: #24c8db;
+  .tabs {
+    display: flex;
+    gap: 0.5rem;
+    background: #16213e;
+    padding: 0.4rem;
+    border-radius: 999px;
   }
 
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
+  .tab {
+    padding: 0.4rem 1.2rem;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: #aaa;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
   }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
 
+  .tab.active {
+    background: #e74c3c;
+    color: white;
+    font-weight: bold;
+  }
+
+  .timer-container {
+    position: relative;
+  }
+
+  .timer-text {
+    font-size: 2.8rem;
+    font-weight: bold;
+    fill: white;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+
+  .count {
+    font-size: 1.4rem;
+    margin: 0;
+  }
+
+  .controls {
+    display: flex;
+    gap: 1rem;
+  }
+
+  .btn {
+    padding: 0.7rem 2rem;
+    border: none;
+    border-radius: 999px;
+    font-size: 1rem;
+    cursor: pointer;
+    font-weight: bold;
+    transition: transform 0.1s, opacity 0.2s;
+  }
+
+  .btn:active {
+    transform: scale(0.96);
+  }
+
+  .start {
+    background: #e74c3c;
+    color: white;
+  }
+
+  .pause {
+    background: #f39c12;
+    color: white;
+  }
+
+  .reset {
+    background: #2c3e50;
+    color: white;
+  }
 </style>
