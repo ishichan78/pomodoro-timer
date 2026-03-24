@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
+
   // --- 状態管理 ---
   type Mode = 'work' | 'shortBreak' | 'longBreak';
 
@@ -64,17 +66,32 @@
     timeLeft = TIMES[mode];
   }
 
+  // --- 通知を送る ---
+  async function notify(title: string, body: string) {
+    let granted = await isPermissionGranted();
+    if (!granted) {
+      const permission = await requestPermission();
+      granted = permission === 'granted';
+    }
+    if (granted) {
+      sendNotification({ title, body });
+    }
+  }
+
   // --- タイマー終了時の処理 ---
   function handleTimerEnd() {
     if (mode === 'work') {
       pomodoroCount += 1;
       // 4回ごとに長い休憩
       if (pomodoroCount % 4 === 0) {
+        notify('🍅 ポモドーロ完了！', '長い休憩を取りましょう (15分)');
         setMode('longBreak');
       } else {
+        notify('🍅 ポモドーロ完了！', '短い休憩を取りましょう (5分)');
         setMode('shortBreak');
       }
     } else {
+      notify('⏰ 休憩終了！', '作業を再開しましょう');
       setMode('work');
     }
   }
